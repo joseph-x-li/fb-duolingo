@@ -2,7 +2,7 @@
 
 Dear Konwoo, 
 
-Please do your Duolingo Lessons
+Please do your Duolingo lessons.
 
 Sincerely,  
 The Duolingo Owl

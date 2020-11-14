@@ -2,8 +2,9 @@ import fbchat
 import duolingo
 import logging
 import random
+import os
 from passwords import duoname, duopass, fbemail, fbpass, people
-filehandler = logging.FileHandler('events.log')
+filehandler = logging.FileHandler(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'events.log'))
 filehandler.setFormatter(logging.Formatter(fmt="%(asctime)s:%(levelname)s:%(message)s"))
 logger = logging.getLogger("fb-duolingo")
 logger.setLevel(logging.INFO)
@@ -46,6 +47,6 @@ def main(patch=None):
         
     # left out due to errors that make me have to reset my facebook password
     # msnger.logout()
-    
+
 if __name__ == "__main__":
     main()

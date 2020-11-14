@@ -1,0 +1,2 @@
+duolingo-api==0.5.3
+fbchat==1.9.7

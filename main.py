@@ -4,33 +4,71 @@ import logging
 import random
 import os
 import time
-from passwords import duoname, duopass, fbemail, fbpass, people
+import toml
+
 filehandler = logging.FileHandler(os.path.join(os.path.dirname(__file__), 'events.log'))
 filehandler.setFormatter(logging.Formatter(fmt="%(asctime)s:%(levelname)s:%(message)s"))
 logger = logging.getLogger("fb-duolingo")
 logger.setLevel(logging.INFO)
 logger.addHandler(filehandler)
 
-# see https://github.com/fbchat-dev/fbchat/issues/615#issuecomment-710127001 
-import re
-# fbchat._util.USER_AGENTS    = ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36"]
-useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.111 Safari/537.36"
-fbchat._state.FB_DTSG_REGEX = re.compile(r'"name":"fb_dtsg","value":"(.*?)"')
+def readconfig():
+    with open('config.toml') as f:
+        config = toml.loads(f.read())
+    return config
 
-def main(patch=None):
-    global people
+def writeconfig(newconfig):
+    with open('config.toml', 'w') as f:
+        toml.dump(newconfig, f)
+
+def getcookies(config):
+    import os
+    os.environ['PATH'] += os.pathsep + "/home/pi/Downloads/geckodriver-0.29.0/target/armv7-unknown-linux-gnueabihf/release"
+
+    from selenium import webdriver
+    opts = webdriver.FirefoxOptions()
+    opts.add_argument("--headless")
+    opts.add_argument("--window-size=1080,1080")
+    test_driver = webdriver.Firefox(options=opts)
+    test_driver.get("https://www.messenger.com/")
+
+    email_input = test_driver.find_element_by_id("email")
+    pass_input = test_driver.find_element_by_id("pass")
+    login_button = test_driver.find_element_by_id("loginbutton")
+    email_input.send_keys(config['facebook']['email'])
+    time.sleep(5)
+    pass_input.send_keys(config['facebook']['password'])
+    time.sleep(5)
+    login_button.submit()
+    time.sleep(5)
+    allcookies = test_driver.get_cookies()
+    
+    successes = 0
+
+    for cookie in allcookies:
+        if cookie['name'] == 'c_user':
+            config['cookies']['c_user'] = cookie['value']
+            successes += 1
+        elif cookie['name'] == 'xs':
+            config['cookies']['xs'] = cookie['value']
+            successes += 1
+
+    if successes != 2:
+        raise RuntimeError("Selenium Login Failed")
+    
+    return config
+
+def query_duolingo(config):
+    duocfg = config['duolingo']
     try:
-        lingo = duolingo.Duolingo(duoname, duopass)
+        lingo = duolingo.Duolingo(duocfg['username'], duocfg['password'])
     except duolingo.DuolingoException as e:
         logger.error(f"Unable to sign into Duolingo: {e}")
         return
-    
-    msnger = None
-    
-    if patch is not None:
-        people = [patch]
-    
-    for uname, fbid in people:
+
+    retval = []
+
+    for uname, fbid in config['people']:
         sleeptime = random.randint(13, 25)
         time.sleep(sleeptime)
         lingo.set_username(uname)
@@ -38,22 +76,46 @@ def main(patch=None):
         if info['streak_extended_today']:
             logger.info(f"{uname} already did a lesson today. Yay!")
             continue
-        if msnger is None:
-            try:
-                # msnger = fbchat.Client(fbemail, fbpass, logging_level=logging.WARNING)
-                msnger = fbchat.Client(fbemail, fbpass, user_agent=useragent, logging_level=logging.WARNING)
-            except fbchat.FBchatException as e:
-                logger.error(f"Unable to sign into Facebook: {e}")
-                return
         logger.info(f"{uname} has not yet done a lesson today... reminding")
-        message = f"Do a Duolingo lesson to save your {info['site_streak']} day streak"
+        retval.append((uname, fbid, info['site_streak']))
+    
+    return retval
+
+def fbremind(config, people):
+    refresh = False    
+    try:
+        msnger = fbchat.Client("", "", session_cookies=config['cookies'], logging_level=logging.WARNING) 
+    except fbchat.FBchatException as e:
+        logger.warning(f"Unable to sign into Facebook: {e}\nTrying to refresh cookies...")
+        refresh = True
+    if refresh:
+        try:
+            config = getcookies(config)
+        except RuntimeError as e:
+            logger.error(f"Unable to sign into Facebook using Selenium: {e}")
+            raise e
+        writeconfig(config)
+        try:
+            msnger = fbchat.Client("", "", session_cookies=config['cookies'], logging_level=logging.WARNING) 
+        except fbchat.FBchatException as e:
+            logger.warning(f"Unable to sign into Facebook using refreshed cookies: {e}\nSomething is horribly wrong...")
+            raise e
+    
+    for uname, fbid, streaklen in people:
+        sleeptime = random.randint(13, 25)
+        time.sleep(sleeptime)
+        message = f"Do a Duolingo lesson to save your {streaklen} day streak"
         message += '!' * random.randint(1, 6)
         msnger.send(fbchat.Message(text=message), thread_id=fbid)
         logger.info(f"Sent \"{message}\" to {uname}")
         msnger.send(fbchat.Message(sticker=fbchat.Sticker("237317987087861")), thread_id=fbid)
-        
-    # left out due to errors that make me have to reset my facebook password
-    # msnger.logout()
 
 if __name__ == "__main__":
-    main()
+    config = readconfig()
+    notifs = query_duolingo(config)
+    if notifs == []:
+        logger.info(f"Everyone did their duolingo lessons. Skipping notificaitons...")
+    else:
+        fbremind(config, notifs)
+
+

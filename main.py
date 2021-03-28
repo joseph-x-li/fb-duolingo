@@ -12,13 +12,15 @@ logger = logging.getLogger("fb-duolingo")
 logger.setLevel(logging.INFO)
 logger.addHandler(filehandler)
 
+CFG_PATH = os.path.join(os.path.dirname(__file__), 'config.toml')
+
 def readconfig():
-    with open('config.toml') as f:
+    with open(CFG_PATH) as f:
         config = toml.loads(f.read())
     return config
 
 def writeconfig(newconfig):
-    with open('config.toml', 'w') as f:
+    with open(CFG_PATH, 'w') as f:
         toml.dump(newconfig, f)
 
 def getcookies(config):
@@ -111,6 +113,8 @@ def fbremind(config, people):
         msnger.send(fbchat.Message(sticker=fbchat.Sticker("237317987087861")), thread_id=fbid)
 
 if __name__ == "__main__":
+    # config = readconfig()
+    # fbremind(config, [])
     config = readconfig()
     notifs = query_duolingo(config)
     if notifs == []:
